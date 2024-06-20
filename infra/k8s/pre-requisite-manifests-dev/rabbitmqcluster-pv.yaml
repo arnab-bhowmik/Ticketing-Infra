@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: persistence-volume-rabbitmq-storage
+  namespace: ticketing-app
+spec:
+  storageClassName: rabbitmq-storage
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: "/home/persistentvolume"
+    type: DirectoryOrCreate

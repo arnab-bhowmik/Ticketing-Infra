@@ -1,0 +1,13 @@
+name: tests-payment-service
+
+on: 
+  pull_request:
+    paths:
+      - 'payment-service/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd payment-service && npm install && npm run test

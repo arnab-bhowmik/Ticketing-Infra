@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-deployment
+  namespace: ticketing-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      containers:
+        - name: auth
+          image: ticketing-app-auth-service:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MONGO_URI
+              value: 'mongodb://auth-mongo-service:27017/authorization'
+            - name: JWT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: JWT_KEY
+            - name: MAILJET_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mailjet-secret
+                  key: MAILJET_API_KEY
+            - name: MAILJET_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mailjet-secret
+                  key: MAILJET_API_SECRET
+            - name: APP_NOTIFICATION_SENDER_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: app-notification-sender-email-address-secret
+                  key: APP_NOTIFICATION_SENDER_EMAIL
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: ticketing-app
+spec:
+  type: ClusterIP
+  selector:
+    app: auth
+  ports:
+    - name: auth
+      protocol: TCP
+      port: 3000
+      targetPort: 3000

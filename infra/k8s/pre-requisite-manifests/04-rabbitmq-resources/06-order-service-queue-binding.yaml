@@ -1,0 +1,41 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: order-service-queue-binding-for-ticket
+  namespace: ticketing-app
+spec:
+  source: ticketing-app-exchange    # an existing exchange
+  destination: order-service-queue  # an existing queue
+  destinationType: queue            # can be 'queue' or 'exchange'
+  routingKey: "ticket.#"
+  vhost: ticketing-app-vhost 
+  rabbitmqClusterReference:
+    name: rabbitmq-cluster
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: order-service-queue-binding-for-expiration
+  namespace: ticketing-app
+spec:
+  source: ticketing-app-exchange    # an existing exchange
+  destination: order-service-queue  # an existing queue
+  destinationType: queue            # can be 'queue' or 'exchange'
+  routingKey: "expiration.#"
+  vhost: ticketing-app-vhost 
+  rabbitmqClusterReference:
+    name: rabbitmq-cluster
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: order-service-queue-binding-for-payment
+  namespace: ticketing-app
+spec:
+  source: ticketing-app-exchange    # an existing exchange
+  destination: order-service-queue  # an existing queue
+  destinationType: queue            # can be 'queue' or 'exchange'
+  routingKey: "payment.#"
+  vhost: ticketing-app-vhost 
+  rabbitmqClusterReference:
+    name: rabbitmq-cluster

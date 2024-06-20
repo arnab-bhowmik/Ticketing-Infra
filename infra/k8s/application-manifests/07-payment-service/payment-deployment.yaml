@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-deployment
+  namespace: ticketing-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payment
+  template:
+    metadata:
+      labels:
+        app: payment
+    spec:
+      containers:
+        - name: payment
+          image: ticketing-app-payment-service:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MONGO_URI
+              value: 'mongodb://payment-mongo-service:27017/payments'
+            - name: JWT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: JWT_KEY
+            - name: MAILJET_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mailjet-secret
+                  key: MAILJET_API_KEY
+            - name: MAILJET_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mailjet-secret
+                  key: MAILJET_API_SECRET
+            - name: APP_NOTIFICATION_SENDER_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: app-notification-sender-email-address-secret
+                  key: APP_NOTIFICATION_SENDER_EMAIL
+            # - name: STRIPE_KEY
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: stripe-secret
+            #       key: STRIPE_KEY
+            - name: RAZORPAY_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: razorpay-secret
+                  key: RAZORPAY_KEY_ID
+            - name: RAZORPAY_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: razorpay-secret
+                  key: RAZORPAY_KEY_SECRET
+            - name: RABBITMQ_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-user-imported-creds-secret
+                  key: username
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-user-imported-creds-secret
+                  key: password
+            - name: RABBITMQ_SERVICE
+              value: 'rabbitmq-cluster'
+            - name: RABBITMQ_VHOST
+              value: 'ticketing-app-vhost'
+            - name: RABBITMQ_EXCHANGE
+              value: 'ticketing-app-exchange'
+            - name: RABBITMQ_QUEUE
+              value: 'payment-service-queue'
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: ticketing-app
+spec:
+  type: ClusterIP
+  selector:
+    app: payment
+  ports:
+    - name: payment
+      protocol: TCP
+      port: 3000
+      targetPort: 3000

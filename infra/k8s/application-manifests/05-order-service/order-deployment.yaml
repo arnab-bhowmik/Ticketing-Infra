@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-deployment
+  namespace: ticketing-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order
+  template:
+    metadata:
+      labels:
+        app: order
+    spec:
+      containers:
+        - name: order
+          image: ticketing-app-order-service:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MONGO_URI
+              value: 'mongodb://order-mongo-service:27017/orders'
+            - name: JWT_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: jwt-secret
+                  key: JWT_KEY
+            - name: MAILJET_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mailjet-secret
+                  key: MAILJET_API_KEY
+            - name: MAILJET_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mailjet-secret
+                  key: MAILJET_API_SECRET
+            - name: APP_NOTIFICATION_SENDER_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: app-notification-sender-email-address-secret
+                  key: APP_NOTIFICATION_SENDER_EMAIL
+            - name: RAZORPAY_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: razorpay-secret
+                  key: RAZORPAY_KEY_ID
+            - name: RAZORPAY_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: razorpay-secret
+                  key: RAZORPAY_KEY_SECRET
+            - name: RABBITMQ_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-user-imported-creds-secret
+                  key: username
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-user-imported-creds-secret
+                  key: password
+            - name: RABBITMQ_SERVICE
+              value: 'rabbitmq-cluster'
+            - name: RABBITMQ_VHOST
+              value: 'ticketing-app-vhost'
+            - name: RABBITMQ_EXCHANGE
+              value: 'ticketing-app-exchange'
+            - name: RABBITMQ_QUEUE
+              value: 'order-service-queue'
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: ticketing-app
+spec:
+  type: ClusterIP
+  selector:
+    app: order
+  ports:
+    - name: order
+      protocol: TCP
+      port: 3000
+      targetPort: 3000

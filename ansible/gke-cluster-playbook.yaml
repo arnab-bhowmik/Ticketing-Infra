@@ -1,0 +1,32 @@
+---
+- name: Create GKE Cluster
+  hosts: jenkins_agent_node
+  gather_facts: false
+  environment:
+    GCLOUD_KEY: "{{ GCLOUD_KEY }}"
+    GCP_PROJECT: "{{ GCP_PROJECT }}"
+    GCP_REGION: "{{ GCP_REGION }}"
+    K8S_CLUSTER_NAME: "{{ K8S_CLUSTER_NAME }}"
+    K8S_CLUSTER_ZONE: "{{ K8S_CLUSTER_ZONE }}"
+    K8S_NODE_TYPE: "{{ K8S_NODE_TYPE }}"
+    K8S_NODE_COUNT: "{{ K8S_NODE_COUNT }}"
+    PROJ_DIR: "{{ PROJ_DIR }}"
+  
+  tasks:
+    - name: Authenticate with Google Cloud 
+      command: gcloud auth activate-service-account --key-file=${GCLOUD_KEY}
+
+    - name: Set Google Cloud project
+      command: gcloud config set project ${GCP_PROJECT}
+
+    - name: Set Google Cloud compute zone
+      command: gcloud config set compute/zone ${GCP_REGION}
+
+    - name: Create Kubernetes Cluster
+      command: gcloud container clusters create ${K8S_CLUSTER_NAME} --zone ${K8S_CLUSTER_ZONE} --machine-type="${K8S_NODE_TYPE}" --num-nodes="${K8S_NODE_COUNT}"
+
+    - name: Configure kubectl to use the new cluster
+      command: gcloud container clusters get-credentials ${K8S_CLUSTER_NAME} --zone ${K8S_CLUSTER_ZONE} --project ${GCP_PROJECT}
+
+    - name: Wait until cluster node(s) are ready
+      command: kubectl wait --for=condition=Ready nodes --all --timeout=10m

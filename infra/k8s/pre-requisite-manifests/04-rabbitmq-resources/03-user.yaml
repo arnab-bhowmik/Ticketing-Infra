@@ -1,0 +1,12 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: User
+metadata:
+  name: rabbitmq-user
+  namespace: ticketing-app
+spec:
+  tags:
+  - management
+  rabbitmqClusterReference:
+    name: rabbitmq-cluster 
+  importCredentialsSecret:
+    name: rabbitmq-user-imported-creds-secret

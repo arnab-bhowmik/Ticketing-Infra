@@ -1,0 +1,13 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: Exchange
+metadata:
+  name: ticketing-app-exchange
+  namespace: ticketing-app
+spec:
+  name: ticketing-app-exchange  # name of the exchange
+  type: topic                   # default to 'direct' if not provided
+  autoDelete: false
+  durable: true
+  vhost: ticketing-app-vhost 
+  rabbitmqClusterReference:
+    name: rabbitmq-cluster 

@@ -1,0 +1,15 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: Queue
+metadata:
+  name: ticket-service-queue
+  namespace: ticketing-app
+spec:
+  name: ticket-service-queue  # name of the queue
+  type: quorum                # without providing a queue type, rabbitmq creates a classic queue
+  autoDelete: false
+  durable: true               # seting 'durable' to false means this queue won't survive a server restart
+  arguments:
+    x-consumer-timeout: 300000
+  vhost: ticketing-app-vhost 
+  rabbitmqClusterReference:
+    name: rabbitmq-cluster    

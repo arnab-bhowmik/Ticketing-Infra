@@ -1,0 +1,10 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: Vhost
+metadata:
+  name: ticketing-app-vhost
+  namespace: ticketing-app
+spec:
+  name: ticketing-app-vhost
+  defaultQueueType: quorum
+  rabbitmqClusterReference:
+    name: rabbitmq-cluster

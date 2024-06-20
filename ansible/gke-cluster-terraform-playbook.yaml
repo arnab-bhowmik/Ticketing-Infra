@@ -1,0 +1,35 @@
+---
+- name: Create GKE Cluster
+  hosts: jenkins_agent_node
+  gather_facts: false
+  environment:
+    GCLOUD_KEY: "{{ GCLOUD_KEY }}"
+    GCP_PROJECT: "{{ GCP_PROJECT }}"
+    GCP_REGION: "{{ GCP_REGION }}"
+    K8S_CLUSTER_NAME: "{{ K8S_CLUSTER_NAME }}"
+    K8S_CLUSTER_ZONE: "{{ K8S_CLUSTER_ZONE }}"
+    K8S_NODE_TYPE: "{{ K8S_NODE_TYPE }}"
+    K8S_NODE_COUNT: "{{ K8S_NODE_COUNT }}"
+    PROJ_DIR: "{{ PROJ_DIR }}"
+  
+  tasks:
+    - name: Initiate Terraform Workspace
+      command: terraform init
+      args:
+        chdir: "{{ PROJ_DIR }}/infra/terraform-scripts"
+
+    - name: Create terraform.tfvars file
+      template:
+        src: "{{ PROJ_DIR }}/infra/terraform-scripts/terraform.tfvars.j2"
+        dest: "{{ PROJ_DIR }}/infra/terraform-scripts/terraform.tfvars"
+
+    - name: Create Kubernetes Cluster
+      command: terraform apply -auto-approve
+      args:
+        chdir: "{{ PROJ_DIR }}/infra/terraform-scripts"
+
+    - name: Configure kubectl to use the new cluster
+      command: gcloud container clusters get-credentials ${K8S_CLUSTER_NAME} --zone ${K8S_CLUSTER_ZONE} --project ${GCP_PROJECT}
+
+    - name: Wait until cluster node(s) are ready
+      command: kubectl wait --for=condition=Ready nodes --all --timeout=10m

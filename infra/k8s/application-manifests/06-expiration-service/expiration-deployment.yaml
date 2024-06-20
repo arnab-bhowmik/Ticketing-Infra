@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: expiration-deployment
+  namespace: ticketing-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: expiration
+  template:
+    metadata:
+      labels:
+        app: expiration
+    spec:
+      containers:
+        - name: expiration
+          image: ticketing-app-expiration-service:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MAILJET_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mailjet-secret
+                  key: MAILJET_API_KEY
+            - name: MAILJET_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mailjet-secret
+                  key: MAILJET_API_SECRET
+            - name: APP_NOTIFICATION_SENDER_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: app-notification-sender-email-address-secret
+                  key: APP_NOTIFICATION_SENDER_EMAIL
+            - name: RABBITMQ_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-user-imported-creds-secret
+                  key: username
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-user-imported-creds-secret
+                  key: password
+            - name: RABBITMQ_SERVICE
+              value: 'rabbitmq-cluster'
+            - name: RABBITMQ_VHOST
+              value: 'ticketing-app-vhost'
+            - name: RABBITMQ_EXCHANGE
+              value: 'ticketing-app-exchange'
+            - name: RABBITMQ_QUEUE
+              value: 'expiration-service-queue'
+            - name: REDIS_HOST
+              value: expiration-redis-service
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: expiration-service
+  namespace: ticketing-app
+spec:
+  type: ClusterIP
+  selector:
+    app: expiration
+  ports:
+    - name: expiration
+      protocol: TCP
+      port: 3000
+      targetPort: 3000

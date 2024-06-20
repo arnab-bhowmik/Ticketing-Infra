@@ -1,0 +1,74 @@
+---
+- name: Deploy Application on GKE
+  hosts: jenkins_agent_node
+  gather_facts: false
+  environment:
+    GCLOUD_KEY:           "{{ GCLOUD_KEY }}"
+    GCP_PROJECT:          "{{ GCP_PROJECT }}"
+    K8S_CLUSTER_NAME:     "{{ K8S_CLUSTER_NAME }}"
+    K8S_CLUSTER_ZONE:     "{{ K8S_CLUSTER_ZONE }}"
+    K8S_NAMESPACE_NGX:    "{{ K8S_NAMESPACE_NGX }}"
+    K8S_NAMESPACE_APP:    "{{ K8S_NAMESPACE_APP }}"
+    K8S_NAMESPACE_MQ:     "{{ K8S_NAMESPACE_MQ }}"
+    K8S_NAMESPACE_CA:     "{{ K8S_NAMESPACE_CA }}"
+    JWT_KEY:              "{{ JWT_KEY }}"
+    RABBITMQ_USERNAME:    "{{ RABBITMQ_USERNAME }}"
+    RABBITMQ_PASSWORD:    "{{ RABBITMQ_PASSWORD }}"
+    RAZORPAY_KEY_ID:      "{{ RAZORPAY_KEY_ID }}"
+    RAZORPAY_KEY_SECRET:  "{{ RAZORPAY_KEY_SECRET }}"
+    MAILJET_API_KEY:      "{{ MAILJET_API_KEY }}"
+    MAILJET_API_SECRET:   "{{ MAILJET_API_SECRET }}"
+    APP_NOTIFICATION_SENDER_EMAIL: "{{ APP_NOTIFICATION_SENDER_EMAIL }}"
+    
+    PROJ_DIR: "{{ PROJ_DIR }}"
+  
+  tasks:
+    - name: Authenticate with Google Cloud 
+      command: gcloud auth activate-service-account --key-file=${GCLOUD_KEY}
+
+    - name: Configure kubectl to use the new cluster
+      command: gcloud container clusters get-credentials ${K8S_CLUSTER_NAME} --zone ${K8S_CLUSTER_ZONE} --project ${GCP_PROJECT}
+
+    - name: Create Application Namespace
+      command: kubectl apply -f ./infra/k8s/pre-requisite-manifests/01-namespace --recursive
+      args:
+        chdir: "{{ PROJ_DIR }}"
+
+    - name: Create K8s Secrets
+      shell: |
+        kubectl create secret generic jwt-secret -n ${K8S_NAMESPACE_APP} --from-literal=JWT_KEY="${JWT_KEY}"
+        kubectl create secret generic rabbitmq-user-imported-creds-secret -n ${K8S_NAMESPACE_APP} --from-literal=username="${RABBITMQ_USERNAME}" --from-literal=password="${RABBITMQ_PASSWORD}"
+        kubectl create secret generic razorpay-secret -n ${K8S_NAMESPACE_APP} --from-literal=RAZORPAY_KEY_ID="${RAZORPAY_KEY_ID}" --from-literal=RAZORPAY_KEY_SECRET="${RAZORPAY_KEY_SECRET}"
+        kubectl create secret generic mailjet-secret -n ${K8S_NAMESPACE_APP} --from-literal=MAILJET_API_KEY="${MAILJET_API_KEY}" --from-literal=MAILJET_API_SECRET="${MAILJET_API_SECRET}"
+        kubectl create secret generic app-notification-sender-email-address-secret 	-n ${K8S_NAMESPACE_APP} --from-literal=APP_NOTIFICATION_SENDER_EMAIL="${APP_NOTIFICATION_SENDER_EMAIL}"
+      args:
+        chdir: "{{ PROJ_DIR }}"
+
+    - name: Deploy Pre-Requisites Kubernetes Deployment Manifests
+      shell: |
+        kubectl apply -f infra/k8s/pre-requisite-manifests/02-rabbitmq-kubernetes-cluster-operator/01-rabbitmq-kubernetes-cluster-operator.yaml
+        sleep 120
+        kubectl apply -f infra/k8s/pre-requisite-manifests-prod/storageclass.yaml
+        kubectl apply -f infra/k8s/pre-requisite-manifests/02-rabbitmq-kubernetes-cluster-operator/02-rabbitmq-cluster.yaml
+        sleep 30
+        kubectl apply -f infra/k8s/pre-requisite-manifests/03-rabbitmq-messaging-topology-operator/01-cert-manager.yaml
+        sleep 30
+        kubectl apply -f infra/k8s/pre-requisite-manifests/03-rabbitmq-messaging-topology-operator/02-rabbitmq-messaging-topology-operator.yaml
+        sleep 30
+        kubectl apply -f infra/k8s/pre-requisite-manifests/04-rabbitmq-resources --recursive
+        sleep 30
+        kubectl apply -f infra/k8s/pre-requisite-manifests-prod/ingress-nginx-controller.yaml
+        sleep 30
+      args:
+        chdir: "{{ PROJ_DIR }}"
+
+    - name: Deploy Application Kubernetes Deployment Manifests
+      shell: |
+        app-manifest-folders=("01-database" "02-client" "03-auth-service" "04-ticket-service" "05-order-service" "06-expiration-service" "07-payment-service")
+        for folder in "${app-manifest-folders[@]}"; do
+            kubectl apply -f "./infra/k8s/application-manifests/${folder}" --recursive
+            sleep 30
+        done
+        kubectl apply -f ./infra/k8s/application-manifests-prod --recursive
+      args:
+        chdir: "{{ PROJ_DIR }}"

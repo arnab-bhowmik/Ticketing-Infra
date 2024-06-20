@@ -1,0 +1,31 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: Permission
+metadata:
+  name: rabbitmq-user-permission
+  namespace: ticketing-app
+spec:
+  vhost: ticketing-app-vhost            # name of a vhost; required
+  userReference:
+    name: "rabbitmq-user"
+  permissions:
+    write: ".*"
+    configure: ".*"
+    read: ".*"
+  rabbitmqClusterReference:
+    name: rabbitmq-cluster
+---
+apiVersion: rabbitmq.com/v1beta1
+kind: TopicPermission
+metadata:
+  name: rabbitmq-user-topic-permission
+  namespace: ticketing-app
+spec:
+  vhost: ticketing-app-vhost            # name of a vhost; required
+  userReference:
+    name: "rabbitmq-user"
+  permissions:
+    exchange: ticketing-app-exchange
+    write: ".*"
+    read: ".*"
+  rabbitmqClusterReference:
+    name: rabbitmq-cluster

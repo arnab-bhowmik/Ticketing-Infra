@@ -1,0 +1,13 @@
+apiVersion: rabbitmq.com/v1beta1
+kind: Binding
+metadata:
+  name: expiration-service-queue-binding
+  namespace: ticketing-app
+spec:
+  source: ticketing-app-exchange        # an existing exchange
+  destination: expiration-service-queue # an existing queue
+  destinationType: queue                # can be 'queue' or 'exchange'
+  routingKey: "order.created"
+  vhost: ticketing-app-vhost 
+  rabbitmqClusterReference:
+    name: rabbitmq-cluster

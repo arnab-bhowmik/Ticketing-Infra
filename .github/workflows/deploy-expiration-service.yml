@@ -1,0 +1,25 @@
+name: deploy-expiration-service
+
+on: 
+  push:
+    branches:
+      - main
+    paths:
+      - 'expiration-service/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - run: cd expiration-service && docker build -t arnab17/ticketing-app-expiration-service .
+      - run: docker login -u $DOCKER_HUB_USERNAME -p $DOCKER_HUB_PASSWORD
+        env:
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+          DOCKER_HUB_PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD }}
+      - run: docker push arnab17/ticketing-app-expiration-service
+      - uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITAL_OCEAN_ACCESS_TOKEN }}
+      - run: doctl kubernetes cluster kubeconfig save ticketing-app-k8-cluster
+      - run: kubectl rollout restart deployment auth-deployment
