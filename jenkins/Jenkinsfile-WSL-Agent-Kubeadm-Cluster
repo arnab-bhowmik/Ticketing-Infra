@@ -307,78 +307,83 @@ pipeline {
                 script {
                     withCredentials([file(credentialsId: 'gke-service-account-key', variable: 'GCLOUD_KEY')]) {
                         withEnv(["DOCKER_IMAGE_NAMES=${env.DOCKER_IMAGE_NAMES}","GCP_PROJECT=${env.GCP_PROJECT}","K8S_CLUSTER_NAME=${env.K8S_CLUSTER_NAME}","K8S_CLUSTER_ZONE=${env.K8S_CLUSTER_ZONE}","ARTIFACT_REGISTRY_NAME=${env.ARTIFACT_REGISTRY_NAME}","ARTIFACT_REGISTRY_LOCATION=${ARTIFACT_REGISTRY_LOCATION}"]) {
-                            sh '''
-                                # Authenticate with Google Cloud using a service account key
-                                gcloud auth activate-service-account --key-file=${GCLOUD_KEY}
-
-                                #for item in $(cat build_artifacts.json | jq -c '.builds[]'); do
-                                    ## Extract the image name and corresponding tag
-                                    #echo "Extracting the image name and corresponding tag..."
-                                    #imageName=$(echo "$item" | jq -r '.imageName')
-                                    #tag=$(echo "$item" | jq -r '.tag | split(":")[1]')
-
-                                    ## Create the corresponding Google Cloud Image name
-                                    #gcrImage="gcr.io/${GCP_PROJECT}/$imageName:latest"
-                                    # gcrImage="${ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${GCP_PROJECT}/${ARTIFACT_REGISTRY_NAME}/$imageName:latest"
-
-                                    ## Tag the extracted Docker image before pushing to Google Cloud Artifact Registry in the format gcr.io/project/repo/image:latest
-                                    #echo "Tagging the extracted Docker image before pushing to Google Cloud Artifact Registry"
-                                    #docker tag $imageName:latest $gcrImage
-
-                                for imageName in ticketing-app-frontend-client ticketing-app-auth-service ticketing-app-expiration-service ticketing-app-ticket-service ticketing-app-order-service ticketing-app-payment-service; do   
-                                    # Create the corresponding Google Cloud Image name
-                                    gcrImage="gcr.io/${GCP_PROJECT}/$imageName:latest"
-                                    # gcrImage="${ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${GCP_PROJECT}/${ARTIFACT_REGISTRY_NAME}/$imageName:latest"
-
-                                    # Tag the Docker image before pushing to Google Cloud Artifact Registry in the format gcr.io/project/repo/image:latest
-                                    echo "Tagging the Docker image before pushing to Google Cloud Artifact Registry"
-                                    docker tag $imageName:latest $gcrImage
+                            dir("${env.WORKSPACE}/infrastructure"){
+                                echo "Current Directory is:"
+                                sh "pwd"
                                 
-                                    # Push the image to Google Cloud Artifact Registry using service account 
-                                    # Ensure the service account has correct access - artifactregistry.writer & artifactregistry.reader on the Container/Artifact Registry
-                                    echo "Pushing the image to Google Cloud Artifact Registry"
-                                    docker push $gcrImage
-                                
-                                    # Print the results & delete the :latest tagged image
-                                    echo "Pushed image $imageName to Google Cloud Artifact Registry with tag as latest"
-                                    docker rmi $gcrImage
+                                sh '''
+                                    # Authenticate with Google Cloud using a service account key
+                                    gcloud auth activate-service-account --key-file=${GCLOUD_KEY}
 
-                                    # Replace the image name in the corresponding Kubernetes deployment manifest file
-                                    if echo "$imageName" | grep -q "client" 
-                                    then
-                                        sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/02-client/*.yaml
-                                        sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/02-client/*.yaml
-                                    elif echo "$imageName" | grep -q "auth-service" 
-                                    then
-                                        sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/03-auth-service/*.yaml
-                                        sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/03-auth-service/*.yaml
-                                    elif echo "$imageName" | grep -q "ticket-service" 
-                                    then
-                                        sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/04-ticket-service/*.yaml
-                                        sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/04-ticket-service/*.yaml
-                                    elif echo "$imageName" | grep -q "order-service" 
-                                    then
-                                        sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/05-order-service/*.yaml
-                                        sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/05-order-service/*.yaml
-                                    elif echo "$imageName" | grep -q "expiration-service" 
-                                    then
-                                        sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/06-expiration-service/*.yaml
-                                        sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/06-expiration-service/*.yaml
-                                    elif echo "$imageName" | grep -q "payment-service" 
-                                    then
-                                        sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/07-payment-service/*.yaml
-                                        sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/07-payment-service/*.yaml
-                                    fi
+                                    #for item in $(cat build_artifacts.json | jq -c '.builds[]'); do
+                                        ## Extract the image name and corresponding tag
+                                        #echo "Extracting the image name and corresponding tag..."
+                                        #imageName=$(echo "$item" | jq -r '.imageName')
+                                        #tag=$(echo "$item" | jq -r '.tag | split(":")[1]')
 
-                                    # Save the image name as environment variable to access later for cleanup
-                                    updatedArray="${DOCKER_IMAGE_NAMES},${imageName}"
-                                    DOCKER_IMAGE_NAMES=$(echo $updatedArray | sed 's/^[,[:space:]]*//;s/[,[:space:]]*$//')
-                                    echo "Updated image name list: ${DOCKER_IMAGE_NAMES}" 
-                                done
+                                        ## Create the corresponding Google Cloud Image name
+                                        #gcrImage="gcr.io/${GCP_PROJECT}/$imageName:latest"
+                                        # gcrImage="${ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${GCP_PROJECT}/${ARTIFACT_REGISTRY_NAME}/$imageName:latest"
 
-                                # Store the environment variable in a file to pass it to the next stage
-                                echo "${DOCKER_IMAGE_NAMES}" > docker_image_names.txt
-                            '''
+                                        ## Tag the extracted Docker image before pushing to Google Cloud Artifact Registry in the format gcr.io/project/repo/image:latest
+                                        #echo "Tagging the extracted Docker image before pushing to Google Cloud Artifact Registry"
+                                        #docker tag $imageName:latest $gcrImage
+
+                                    for imageName in ticketing-app-frontend-client ticketing-app-auth-service ticketing-app-expiration-service ticketing-app-ticket-service ticketing-app-order-service ticketing-app-payment-service; do   
+                                        # Create the corresponding Google Cloud Image name
+                                        gcrImage="gcr.io/${GCP_PROJECT}/$imageName:latest"
+                                        # gcrImage="${ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${GCP_PROJECT}/${ARTIFACT_REGISTRY_NAME}/$imageName:latest"
+
+                                        # Tag the Docker image before pushing to Google Cloud Artifact Registry in the format gcr.io/project/repo/image:latest
+                                        echo "Tagging the Docker image before pushing to Google Cloud Artifact Registry"
+                                        docker tag $imageName:latest $gcrImage
+                                    
+                                        # Push the image to Google Cloud Artifact Registry using service account 
+                                        # Ensure the service account has correct access - artifactregistry.writer & artifactregistry.reader on the Container/Artifact Registry
+                                        echo "Pushing the image to Google Cloud Artifact Registry"
+                                        docker push $gcrImage
+                                    
+                                        # Print the results & delete the :latest tagged image
+                                        echo "Pushed image $imageName to Google Cloud Artifact Registry with tag as latest"
+                                        docker rmi $gcrImage
+
+                                        # Replace the image name in the corresponding Kubernetes deployment manifest file
+                                        if echo "$imageName" | grep -q "client" 
+                                        then
+                                            sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/02-client/*.yaml
+                                            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/02-client/*.yaml
+                                        elif echo "$imageName" | grep -q "auth-service" 
+                                        then
+                                            sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/03-auth-service/*.yaml
+                                            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/03-auth-service/*.yaml
+                                        elif echo "$imageName" | grep -q "ticket-service" 
+                                        then
+                                            sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/04-ticket-service/*.yaml
+                                            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/04-ticket-service/*.yaml
+                                        elif echo "$imageName" | grep -q "order-service" 
+                                        then
+                                            sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/05-order-service/*.yaml
+                                            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/05-order-service/*.yaml
+                                        elif echo "$imageName" | grep -q "expiration-service" 
+                                        then
+                                            sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/06-expiration-service/*.yaml
+                                            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/06-expiration-service/*.yaml
+                                        elif echo "$imageName" | grep -q "payment-service" 
+                                        then
+                                            sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/07-payment-service/*.yaml
+                                            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/07-payment-service/*.yaml
+                                        fi
+
+                                        # Save the image name as environment variable to access later for cleanup
+                                        updatedArray="${DOCKER_IMAGE_NAMES},${imageName}"
+                                        DOCKER_IMAGE_NAMES=$(echo $updatedArray | sed 's/^[,[:space:]]*//;s/[,[:space:]]*$//')
+                                        echo "Updated image name list: ${DOCKER_IMAGE_NAMES}" 
+                                    done
+
+                                    # Store the environment variable in a file to pass it to the next stage
+                                    echo "${DOCKER_IMAGE_NAMES}" > docker_image_names.txt
+                                '''
+                            }
                         }
                     }
                 }
@@ -488,11 +493,16 @@ pipeline {
         //     steps {
         //         script {
         //             withCredentials([file(credentialsId: 'gke-service-account-key', variable: 'GCLOUD_KEY')]) {
-        //                 withEnv(["GCP_PROJECT=${env.GCP_PROJECT}","GCP_REGION=${env.GCP_REGION}","K8S_CLUSTER_NAME=${env.K8S_CLUSTER_NAME}","K8S_CLUSTER_ZONE=${env.K8S_CLUSTER_ZONE}","K8S_NODE_TYPE=${env.K8S_NODE_TYPE}","K8S_NODE_COUNT=${env.K8S_NODE_COUNT}","PROJ_DIR=${env.WORKSPACE}"]) {
-        //                     sh '''
-        //                         # Ensure the service account has correct access - container.admin/container.clusterAdmin and iam.serviceAccountUser
-        //                         ansible-playbook -i ./ansible/gke-inventory.ini ./ansible/gke-cluster-playbook.yaml -e "GCLOUD_KEY=${GCLOUD_KEY}" -e "GCP_PROJECT=${GCP_PROJECT}" -e "GCP_REGION=${GCP_REGION}" -e "K8S_CLUSTER_NAME=${K8S_CLUSTER_NAME}" -e "K8S_CLUSTER_ZONE=${K8S_CLUSTER_ZONE}" -e "K8S_NODE_TYPE=${K8S_NODE_TYPE}" -e "K8S_NODE_COUNT=${K8S_NODE_COUNT}" -e "PROJ_DIR=${PROJ_DIR}"
-        //                     '''
+        //                 withEnv(["GCP_PROJECT=${env.GCP_PROJECT}","GCP_REGION=${env.GCP_REGION}","K8S_CLUSTER_NAME=${env.K8S_CLUSTER_NAME}","K8S_CLUSTER_ZONE=${env.K8S_CLUSTER_ZONE}","K8S_NODE_TYPE=${env.K8S_NODE_TYPE}","K8S_NODE_COUNT=${env.K8S_NODE_COUNT}","PROJ_DIR=${env.WORKSPACE}/infrastructure"]) {
+        //                     dir("${env.WORKSPACE}/infrastructure"){
+        //                         echo "Current Directory is:"
+        //                         sh "pwd"
+                                
+        //                         sh '''
+        //                             # Ensure the service account has correct access - container.admin/container.clusterAdmin and iam.serviceAccountUser
+        //                             ansible-playbook -i ./ansible/gke-inventory.ini ./ansible/gke-cluster-playbook.yaml -e "GCLOUD_KEY=${GCLOUD_KEY}" -e "GCP_PROJECT=${GCP_PROJECT}" -e "GCP_REGION=${GCP_REGION}" -e "K8S_CLUSTER_NAME=${K8S_CLUSTER_NAME}" -e "K8S_CLUSTER_ZONE=${K8S_CLUSTER_ZONE}" -e "K8S_NODE_TYPE=${K8S_NODE_TYPE}" -e "K8S_NODE_COUNT=${K8S_NODE_COUNT}" -e "PROJ_DIR=${PROJ_DIR}"
+        //                         '''
+        //                     }
         //                 }
         //             }
         //         }
@@ -503,11 +513,16 @@ pipeline {
             steps {
                 script {
                     withCredentials([file(credentialsId: 'gke-service-account-key', variable: 'GCLOUD_KEY')]) {
-                        withEnv(["GCP_PROJECT=${env.GCP_PROJECT}","GCP_REGION=${env.GCP_REGION}","K8S_CLUSTER_NAME=${env.K8S_CLUSTER_NAME}","K8S_CLUSTER_ZONE=${env.K8S_CLUSTER_ZONE}","K8S_NODE_TYPE=${env.K8S_NODE_TYPE}","K8S_NODE_COUNT=${env.K8S_NODE_COUNT}","PROJ_DIR=${env.WORKSPACE}"]) {
-                            sh '''
-                                # Ensure the service account has correct access - container.admin/container.clusterAdmin, compute.viewer and iam.serviceAccountUser
-                                ansible-playbook -i ./ansible/gke-inventory.ini ./ansible/gke-cluster-terraform-playbook.yaml -e "GCLOUD_KEY=${GCLOUD_KEY}" -e "GCP_PROJECT=${GCP_PROJECT}" -e "GCP_REGION=${GCP_REGION}" -e "K8S_CLUSTER_NAME=${K8S_CLUSTER_NAME}" -e "K8S_CLUSTER_ZONE=${K8S_CLUSTER_ZONE}" -e "K8S_NODE_TYPE=${K8S_NODE_TYPE}" -e "K8S_NODE_COUNT=${K8S_NODE_COUNT}" -e "PROJ_DIR=${PROJ_DIR}"
-                            '''
+                        withEnv(["GCP_PROJECT=${env.GCP_PROJECT}","GCP_REGION=${env.GCP_REGION}","K8S_CLUSTER_NAME=${env.K8S_CLUSTER_NAME}","K8S_CLUSTER_ZONE=${env.K8S_CLUSTER_ZONE}","K8S_NODE_TYPE=${env.K8S_NODE_TYPE}","K8S_NODE_COUNT=${env.K8S_NODE_COUNT}","PROJ_DIR=${env.WORKSPACE}/infrastructure"]) {
+                            dir("${env.WORKSPACE}/infrastructure"){
+                                echo "Current Directory is:"
+                                sh "pwd"
+                                
+                                sh '''
+                                    # Ensure the service account has correct access - container.admin/container.clusterAdmin, compute.viewer and iam.serviceAccountUser
+                                    ansible-playbook -i ./ansible/gke-inventory.ini ./ansible/gke-cluster-terraform-playbook.yaml -e "GCLOUD_KEY=${GCLOUD_KEY}" -e "GCP_PROJECT=${GCP_PROJECT}" -e "GCP_REGION=${GCP_REGION}" -e "K8S_CLUSTER_NAME=${K8S_CLUSTER_NAME}" -e "K8S_CLUSTER_ZONE=${K8S_CLUSTER_ZONE}" -e "K8S_NODE_TYPE=${K8S_NODE_TYPE}" -e "K8S_NODE_COUNT=${K8S_NODE_COUNT}" -e "PROJ_DIR=${PROJ_DIR}"
+                                '''
+                            }
                         }
                     }
                 }
@@ -518,93 +533,98 @@ pipeline {
             steps {
                 script {
                     withCredentials([file(credentialsId: 'gke-service-account-key', variable: 'GCLOUD_KEY'),string(credentialsId: 'jwt-secret-key', variable: 'JWT_KEY'),string(credentialsId: 'rabbitmq-username', variable: 'RABBITMQ_USERNAME'),string(credentialsId: 'rabbitmq-password', variable: 'RABBITMQ_PASSWORD'),string(credentialsId: 'rzp-key-id', variable: 'RAZORPAY_KEY_ID'),string(credentialsId: 'rzp-key-secret', variable: 'RAZORPAY_KEY_SECRET'),string(credentialsId: 'mailjet-api-key', variable: 'MAILJET_API_KEY'),string(credentialsId: 'mailjet-api-secret', variable: 'MAILJET_API_SECRET'),string(credentialsId: 'notification-email-sender', variable: 'APP_NOTIFICATION_SENDER_EMAIL')]) {
-                        withEnv(["K8S_NAMESPACE_NGX=${env.K8S_NAMESPACE_NGX}","K8S_NAMESPACE_APP=${env.K8S_NAMESPACE_APP}","GCP_PROJECT=${env.GCP_PROJECT}","K8S_CLUSTER_NAME=${env.K8S_CLUSTER_NAME}","K8S_CLUSTER_ZONE=${env.K8S_CLUSTER_ZONE}"]) {                            
-                            sh '''
-                                # Authenticate with Google Cloud using a service account key
-                                gcloud auth activate-service-account --key-file=${GCLOUD_KEY}
+                        withEnv(["K8S_NAMESPACE_NGX=${env.K8S_NAMESPACE_NGX}","K8S_NAMESPACE_APP=${env.K8S_NAMESPACE_APP}","GCP_PROJECT=${env.GCP_PROJECT}","K8S_CLUSTER_NAME=${env.K8S_CLUSTER_NAME}","K8S_CLUSTER_ZONE=${env.K8S_CLUSTER_ZONE}"]) {
+                            dir("${env.WORKSPACE}/infrastructure"){
+                                echo "Current Directory is:"
+                                sh "pwd"
+                                                        
+                                sh '''
+                                    # Authenticate with Google Cloud using a service account key
+                                    gcloud auth activate-service-account --key-file=${GCLOUD_KEY}
 
-                                # Set the GKE cluster context
-                                gcloud container clusters get-credentials ${K8S_CLUSTER_NAME} --zone ${K8S_CLUSTER_ZONE} --project ${GCP_PROJECT}
-                             
-                                # Create the application namespace
-                                kubectl apply -f ./infra/k8s/pre-requisite-manifests/01-namespace --recursive
+                                    # Set the GKE cluster context
+                                    gcloud container clusters get-credentials ${K8S_CLUSTER_NAME} --zone ${K8S_CLUSTER_ZONE} --project ${GCP_PROJECT}
+                                
+                                    # Create the application namespace
+                                    kubectl apply -f infra/k8s/pre-requisite-manifests/01-namespace --recursive
 
-                                ############################### K8s SECRETS ###############################
-                                # Create a JWT Secret to be used for Authentication
-                                kubectl create secret generic jwt-secret -n ${K8S_NAMESPACE_APP} --from-literal=JWT_KEY="${JWT_KEY}"
-                                
-                                # Create a custom RabbitMQ User Secret to be used for authenticating services to the RabbitMQ Broker
-                                kubectl create secret generic rabbitmq-user-imported-creds-secret -n ${K8S_NAMESPACE_APP} --from-literal=username="${RABBITMQ_USERNAME}" --from-literal=password="${RABBITMQ_PASSWORD}"
-                                
-                                # Create a custom Razorpay API Key Secret to be used for authenticating services to the Razorpay Payment Gateway
-                                kubectl create secret generic razorpay-secret -n ${K8S_NAMESPACE_APP} --from-literal=RAZORPAY_KEY_ID="${RAZORPAY_KEY_ID}" --from-literal=RAZORPAY_KEY_SECRET="${RAZORPAY_KEY_SECRET}"
-                                 
-                                # Create a custom MailJet API Key Secret to be used for authenticating services to the MailJet Server
-                                kubectl create secret generic mailjet-secret -n ${K8S_NAMESPACE_APP} --from-literal=MAILJET_API_KEY="${MAILJET_API_KEY}" --from-literal=MAILJET_API_SECRET="${MAILJET_API_SECRET}"
-                                 
-                                # Create a custom Secret to store the Email address for sending notifications to Users
-                                kubectl create secret generic app-notification-sender-email-address-secret 	-n ${K8S_NAMESPACE_APP} --from-literal=APP_NOTIFICATION_SENDER_EMAIL="${APP_NOTIFICATION_SENDER_EMAIL}"
-                                
-                                ############################### PRE-REQUISITES ###############################
-                                # Deploy the RabbitMQ Cluster Operator
-                                kubectl apply -f infra/k8s/pre-requisite-manifests/02-rabbitmq-kubernetes-cluster-operator/01-rabbitmq-kubernetes-cluster-operator.yaml
-                                
-                                sleep 120
-                                echo "Displaying all resources for namespace - ${K8S_NAMESPACE_MQ}"
-                                kubectl get all  -n ${K8S_NAMESPACE_MQ}
-        
-                                # Deploy the StorageClass for use by RabbitMQ Cluster
-                                kubectl apply -f infra/k8s/pre-requisite-manifests-prod/storageclass.yaml
+                                    ############################### K8s SECRETS ###############################
+                                    # Create a JWT Secret to be used for Authentication
+                                    kubectl create secret generic jwt-secret -n ${K8S_NAMESPACE_APP} --from-literal=JWT_KEY="${JWT_KEY}"
+                                    
+                                    # Create a custom RabbitMQ User Secret to be used for authenticating services to the RabbitMQ Broker
+                                    kubectl create secret generic rabbitmq-user-imported-creds-secret -n ${K8S_NAMESPACE_APP} --from-literal=username="${RABBITMQ_USERNAME}" --from-literal=password="${RABBITMQ_PASSWORD}"
+                                    
+                                    # Create a custom Razorpay API Key Secret to be used for authenticating services to the Razorpay Payment Gateway
+                                    kubectl create secret generic razorpay-secret -n ${K8S_NAMESPACE_APP} --from-literal=RAZORPAY_KEY_ID="${RAZORPAY_KEY_ID}" --from-literal=RAZORPAY_KEY_SECRET="${RAZORPAY_KEY_SECRET}"
+                                    
+                                    # Create a custom MailJet API Key Secret to be used for authenticating services to the MailJet Server
+                                    kubectl create secret generic mailjet-secret -n ${K8S_NAMESPACE_APP} --from-literal=MAILJET_API_KEY="${MAILJET_API_KEY}" --from-literal=MAILJET_API_SECRET="${MAILJET_API_SECRET}"
+                                    
+                                    # Create a custom Secret to store the Email address for sending notifications to Users
+                                    kubectl create secret generic app-notification-sender-email-address-secret 	-n ${K8S_NAMESPACE_APP} --from-literal=APP_NOTIFICATION_SENDER_EMAIL="${APP_NOTIFICATION_SENDER_EMAIL}"
+                                    
+                                    ############################### PRE-REQUISITES ###############################
+                                    # Deploy the RabbitMQ Cluster Operator
+                                    kubectl apply -f infra/k8s/pre-requisite-manifests/02-rabbitmq-kubernetes-cluster-operator/01-rabbitmq-kubernetes-cluster-operator.yaml
+                                    
+                                    sleep 120
+                                    echo "Displaying all resources for namespace - ${K8S_NAMESPACE_MQ}"
+                                    kubectl get all  -n ${K8S_NAMESPACE_MQ}
+            
+                                    # Deploy the StorageClass for use by RabbitMQ Cluster
+                                    kubectl apply -f infra/k8s/pre-requisite-manifests-prod/storageclass.yaml
 
-                                # Deploy the RabbitMQ Cluster. This step also creates the PersistentVolume Claim for binding the persistent volume
-                                kubectl apply -f infra/k8s/pre-requisite-manifests/02-rabbitmq-kubernetes-cluster-operator/02-rabbitmq-cluster.yaml
-                     
-                                sleep 30
-                                echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
-                                kubectl get all  -n ${K8S_NAMESPACE_APP}
-                                
-                                # Deploy the Cert Manager
-                                kubectl apply -f infra/k8s/pre-requisite-manifests/03-rabbitmq-messaging-topology-operator/01-cert-manager.yaml
-                                 
-                                sleep 30
-                                echo "Displaying all resources for namespace - ${K8S_NAMESPACE_CA}"
-                                kubectl get all  -n ${K8S_NAMESPACE_CA}
-                                
-                                # Deploy the RabbitMQ Messaging Topology Operator
-                                kubectl apply -f infra/k8s/pre-requisite-manifests/03-rabbitmq-messaging-topology-operator/02-rabbitmq-messaging-topology-operator.yaml
-                                
-                                sleep 30
-                                echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
-                                kubectl get all  -n ${K8S_NAMESPACE_APP}
-                                
-                                # Deploy the RabbitMQ Cluster Resources
-                                kubectl apply -f infra/k8s/pre-requisite-manifests/04-rabbitmq-resources --recursive
-                                
-                                sleep 30
-                                echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
-                                kubectl get all  -n ${K8S_NAMESPACE_APP}
-                                
-                                # Deploy the ingress-nginx controller
-                                kubectl apply -f infra/k8s/pre-requisite-manifests-prod/ingress-nginx-controller.yaml
-                                
-                                sleep 30
-                                echo "Displaying all resources for namespace - ${K8S_NAMESPACE_NGX}"
-                                kubectl get all  -n ${K8S_NAMESPACE_NGX}
-                                
-                                ############################### APPLICATION ###############################
-                                # Deploy the Application Manifest files on Google Cloud Kubernetes Cluster
-                                for folder in 01-database 02-client 03-auth-service 04-ticket-service 05-order-service 06-expiration-service 07-payment-service; do
-                                    kubectl apply -f "./infra/k8s/application-manifests/${folder}" --recursive
+                                    # Deploy the RabbitMQ Cluster. This step also creates the PersistentVolume Claim for binding the persistent volume
+                                    kubectl apply -f infra/k8s/pre-requisite-manifests/02-rabbitmq-kubernetes-cluster-operator/02-rabbitmq-cluster.yaml
+                        
                                     sleep 30
-                                done
-        
-                                # Deploy the Application Manifest files specific for Google Cloud Kubernetes Cluster
-                                kubectl apply -f ./infra/k8s/application-manifests-prod --recursive
-        
-                                sleep 30
-                                echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
-                                kubectl get all  -n ${K8S_NAMESPACE_APP}
-                            '''
+                                    echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
+                                    kubectl get all  -n ${K8S_NAMESPACE_APP}
+                                    
+                                    # Deploy the Cert Manager
+                                    kubectl apply -f infra/k8s/pre-requisite-manifests/03-rabbitmq-messaging-topology-operator/01-cert-manager.yaml
+                                    
+                                    sleep 30
+                                    echo "Displaying all resources for namespace - ${K8S_NAMESPACE_CA}"
+                                    kubectl get all  -n ${K8S_NAMESPACE_CA}
+                                    
+                                    # Deploy the RabbitMQ Messaging Topology Operator
+                                    kubectl apply -f infra/k8s/pre-requisite-manifests/03-rabbitmq-messaging-topology-operator/02-rabbitmq-messaging-topology-operator.yaml
+                                    
+                                    sleep 30
+                                    echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
+                                    kubectl get all  -n ${K8S_NAMESPACE_APP}
+                                    
+                                    # Deploy the RabbitMQ Cluster Resources
+                                    kubectl apply -f infra/k8s/pre-requisite-manifests/04-rabbitmq-resources --recursive
+                                    
+                                    sleep 30
+                                    echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
+                                    kubectl get all  -n ${K8S_NAMESPACE_APP}
+                                    
+                                    # Deploy the ingress-nginx controller
+                                    kubectl apply -f infra/k8s/pre-requisite-manifests-prod/ingress-nginx-controller.yaml
+                                    
+                                    sleep 30
+                                    echo "Displaying all resources for namespace - ${K8S_NAMESPACE_NGX}"
+                                    kubectl get all  -n ${K8S_NAMESPACE_NGX}
+                                    
+                                    ############################### APPLICATION ###############################
+                                    # Deploy the Application Manifest files on Google Cloud Kubernetes Cluster
+                                    for folder in 01-database 02-client 03-auth-service 04-ticket-service 05-order-service 06-expiration-service 07-payment-service; do
+                                        kubectl apply -f "./infra/k8s/application-manifests/${folder}" --recursive
+                                        sleep 30
+                                    done
+            
+                                    # Deploy the Application Manifest files specific for Google Cloud Kubernetes Cluster
+                                    kubectl apply -f ./infra/k8s/application-manifests-prod --recursive
+            
+                                    sleep 30
+                                    echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
+                                    kubectl get all  -n ${K8S_NAMESPACE_APP}
+                                '''
+                            }
                         }
                     }
                 }
@@ -615,11 +635,16 @@ pipeline {
         //     steps {
         //         script {
         //             withCredentials([file(credentialsId: 'gke-service-account-key', variable: 'GCLOUD_KEY'),string(credentialsId: 'jwt-secret-key', variable: 'JWT_KEY'),string(credentialsId: 'rabbitmq-username', variable: 'RABBITMQ_USERNAME'),string(credentialsId: 'rabbitmq-password', variable: 'RABBITMQ_PASSWORD'),string(credentialsId: 'rzp-key-id', variable: 'RAZORPAY_KEY_ID'),string(credentialsId: 'rzp-key-secret', variable: 'RAZORPAY_KEY_SECRET'),string(credentialsId: 'mailjet-api-key', variable: 'MAILJET_API_KEY'),string(credentialsId: 'mailjet-api-secret', variable: 'MAILJET_API_SECRET'),string(credentialsId: 'notification-email-sender', variable: 'APP_NOTIFICATION_SENDER_EMAIL')]) {
-        //                 withEnv(["K8S_NAMESPACE_NGX=${env.K8S_NAMESPACE_NGX}","K8S_NAMESPACE_APP=${env.K8S_NAMESPACE_APP}","GCP_PROJECT=${env.GCP_PROJECT}","K8S_CLUSTER_NAME=${env.K8S_CLUSTER_NAME}","K8S_CLUSTER_ZONE=${env.K8S_CLUSTER_ZONE}","PROJ_DIR=${env.WORKSPACE}"]) {
-        //                     sh '''
-        //                         # Ensure the service account has correct access - container.admin/container.clusterAdmin and iam.serviceAccountUser
-        //                         ansible-playbook -i ./ansible/gke-inventory.ini ./ansible/gke-deploy-playbook.yaml -e "GCLOUD_KEY=${GCLOUD_KEY}" -e "JWT_KEY=${JWT_KEY}" -e "RABBITMQ_USERNAME=${RABBITMQ_USERNAME}" -e "RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}" -e "RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID}" -e "RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET}" -e "MAILJET_API_KEY=${MAILJET_API_KEY}" -e "MAILJET_API_SECRET=${MAILJET_API_SECRET}" -e "APP_NOTIFICATION_SENDER_EMAIL=${APP_NOTIFICATION_SENDER_EMAIL}" -e "K8S_NAMESPACE_NGX=${K8S_NAMESPACE_NGX}" -e "K8S_NAMESPACE_APP=${K8S_NAMESPACE_APP}" -e "K8S_NAMESPACE_MQ=${K8S_NAMESPACE_MQ}" -e "K8S_NAMESPACE_CA=${K8S_NAMESPACE_CA}" -e "GCP_PROJECT=${GCP_PROJECT}" -e "K8S_CLUSTER_NAME=${K8S_CLUSTER_NAME}" -e "K8S_CLUSTER_ZONE=${K8S_CLUSTER_ZONE}" -e "PROJ_DIR=${PROJ_DIR}"
-        //                     '''
+        //                 withEnv(["K8S_NAMESPACE_NGX=${env.K8S_NAMESPACE_NGX}","K8S_NAMESPACE_APP=${env.K8S_NAMESPACE_APP}","GCP_PROJECT=${env.GCP_PROJECT}","K8S_CLUSTER_NAME=${env.K8S_CLUSTER_NAME}","K8S_CLUSTER_ZONE=${env.K8S_CLUSTER_ZONE}","PROJ_DIR=${env.WORKSPACE}/infrastructure"]) {
+        //                     dir("${env.WORKSPACE}/infrastructure"){
+        //                         echo "Current Directory is:"
+        //                         sh "pwd"
+                                
+        //                         sh '''
+        //                             # Ensure the service account has correct access - container.admin/container.clusterAdmin and iam.serviceAccountUser
+        //                             ansible-playbook -i ./ansible/gke-inventory.ini ./ansible/gke-deploy-playbook.yaml -e "GCLOUD_KEY=${GCLOUD_KEY}" -e "JWT_KEY=${JWT_KEY}" -e "RABBITMQ_USERNAME=${RABBITMQ_USERNAME}" -e "RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}" -e "RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID}" -e "RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET}" -e "MAILJET_API_KEY=${MAILJET_API_KEY}" -e "MAILJET_API_SECRET=${MAILJET_API_SECRET}" -e "APP_NOTIFICATION_SENDER_EMAIL=${APP_NOTIFICATION_SENDER_EMAIL}" -e "K8S_NAMESPACE_NGX=${K8S_NAMESPACE_NGX}" -e "K8S_NAMESPACE_APP=${K8S_NAMESPACE_APP}" -e "K8S_NAMESPACE_MQ=${K8S_NAMESPACE_MQ}" -e "K8S_NAMESPACE_CA=${K8S_NAMESPACE_CA}" -e "GCP_PROJECT=${GCP_PROJECT}" -e "K8S_CLUSTER_NAME=${K8S_CLUSTER_NAME}" -e "K8S_CLUSTER_ZONE=${K8S_CLUSTER_ZONE}" -e "PROJ_DIR=${PROJ_DIR}"
+        //                         '''
+        //                     }
         //                 }
         //             }
         //         }
