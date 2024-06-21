@@ -48,15 +48,18 @@ pipeline {
         
         stage('Checkout Git Repo') {
             steps {
-                // Clone the Git Repo in the Agent
-                checkout scmGit(branches: [[name: '*/main']], extensions: [submodule(recursiveSubmodules: true, reference: '')], userRemoteConfigs: [[url: 'https://github.com/arnab-bhowmik/Ticketing-App.git']])
+                // Clone the Application Git Repo in the Agent
+                checkout scmGit(branches: [[name: '*/main']], extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'application'], submodule(recursiveSubmodules: true, reference: '')], userRemoteConfigs: [[url: 'https://github.com/arnab-bhowmik/Ticketing-App.git']])
+                
+                // Clone the Infrastructure Git Repo in the Agent
+                checkout scmGit(branches: [[name: '*/main']], extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: 'infrastructure'], submodule(recursiveSubmodules: true, reference: '')], userRemoteConfigs: [[url: 'https://github.com/arnab-bhowmik/Ticketing-Infra.git']])
             }
         }
         
         stage('Install Dependencies on Agent Node') {
             steps {
                 withCredentials([string(credentialsId: 'wsl-agent-sudo-password', variable: 'SUDO_PASSWORD')]) {
-                    dir("${env.WORKSPACE}/jenkins"){
+                    dir("${env.WORKSPACE}/infrastructure/jenkins"){
                         echo "Current Directory is:"
                         sh "pwd"
                         sh '''
@@ -74,82 +77,54 @@ pipeline {
             }
         }
         
-        stage('Install NPM Dependencies') {
+        stage('Test APIs for Authentication Service') {
             steps {
-                dir("${env.WORKSPACE}/client"){
+                dir("${env.WORKSPACE}/application/auth-service"){
                     echo "Current Directory is:"
                     sh "pwd"
-                    sh 'npm install'
-                }
-                dir("${env.WORKSPACE}/auth-service"){
-                    echo "Current Directory is:"
-                    sh "pwd"
-                    sh 'npm install'
-                }
-                dir("${env.WORKSPACE}/ticket-service"){
-                    echo "Current Directory is:"
-                    sh "pwd"
-                    sh 'npm install'
-                }
-                dir("${env.WORKSPACE}/order-service"){
-                    echo "Current Directory is:"
-                    sh "pwd"
-                    sh 'npm install'
-                }
-                dir("${env.WORKSPACE}/expiration-service"){
-                    echo "Current Directory is:"
-                    sh "pwd"
-                    sh 'npm install'
-                }
-                dir("${env.WORKSPACE}/payment-service"){
-                    echo "Current Directory is:"
-                    sh "pwd"
-                    sh 'npm install'
-                }
-                dir("${env.WORKSPACE}/Custom-Modules"){
-                    echo "Current Directory is:"
-                    sh "pwd"
-                    sh 'npm install'
-                }
-            }
-        }
-        
-        stage('Test APIs for Authentication Service - User SignUp/SignIn/SignOut/View') {
-            steps {
-                dir("${env.WORKSPACE}/auth-service"){
-                    echo "Current Directory is:"
-                    sh "pwd"
-                    sh 'npm test'
+                    sh '''
+                        npm install
+                        npm test
+                    '''
                 }
             }
         }
 
-        stage('Test APIs for Ticket Service - Ticket Create/Update/Delete/View') {
+        stage('Test APIs for Ticket Service') {
             steps {
-                dir("${env.WORKSPACE}/ticket-service"){
+                dir("${env.WORKSPACE}/application/ticket-service"){
                     echo "Current Directory is:"
                     sh "pwd"
-                    sh 'npm test'
+                    sh '''
+                        npm install
+                        npm test
+                    '''
                 }
             }
         }
 
-        stage('Test APIs for Order Service - Order Create/Cancel/View') {
+        stage('Test APIs for Order Service') {
             steps {
-                dir("${env.WORKSPACE}/order-service"){
+                dir("${env.WORKSPACE}/application/order-service"){
                     echo "Current Directory is:"
                     sh "pwd"
-                    sh 'npm test'
+                    sh '''
+                        npm install
+                        npm test
+                    '''
                 }
             }
         }
 
-        stage('Test APIs for Payment Service - Payment Create') {
+        stage('Test APIs for Payment Service') {
             steps {
-                dir("${env.WORKSPACE}/payment-service"){
+                dir("${env.WORKSPACE}/application/payment-service"){
                     echo "Current Directory is:"
                     sh "pwd"
-                    sh 'npm test'
+                    sh '''
+                        npm install
+                        npm test
+                    '''
                 }
             }
         }
@@ -159,7 +134,7 @@ pipeline {
                 script {
                     withCredentials([string(credentialsId: 'jwt-secret-key', variable: 'JWT_KEY'),string(credentialsId: 'rabbitmq-username', variable: 'RABBITMQ_USERNAME'),string(credentialsId: 'rabbitmq-password', variable: 'RABBITMQ_PASSWORD'),string(credentialsId: 'rzp-key-id', variable: 'RAZORPAY_KEY_ID'),string(credentialsId: 'rzp-key-secret', variable: 'RAZORPAY_KEY_SECRET'),string(credentialsId: 'mailjet-api-key', variable: 'MAILJET_API_KEY'),string(credentialsId: 'mailjet-api-secret', variable: 'MAILJET_API_SECRET'),string(credentialsId: 'notification-email-sender', variable: 'APP_NOTIFICATION_SENDER_EMAIL')]) {
                         withEnv(["K8S_NAMESPACE_NGX=${env.K8S_NAMESPACE_NGX}","K8S_NAMESPACE_APP=${env.K8S_NAMESPACE_APP}","KUBECTL_DEV_CONTEXT=${env.KUBECTL_DEV_CONTEXT}"]) {
-                            dir("${env.WORKSPACE}"){
+                            dir("${env.WORKSPACE}/infrastructure"){
                                 echo "Current Directory is:"
                                 sh "pwd"
                                 
@@ -255,20 +230,20 @@ pipeline {
 
                                     # Build the Back-End Application Docker Images
                                     for folder in auth-service expiration-service ticket-service order-service payment-service; do
-                                        docker build -t "ticketing-app-${folder}" -f "${folder}/Dockerfile" "${folder}/"
+                                        docker build -t "ticketing-app-${folder}" -f "../application/${folder}/Dockerfile" "../application/${folder}/"
                                     done
 
                                     # Build the Front-End Application Docker Images
-                                    docker build -t ticketing-app-frontend-client -f client/Dockerfile client/
+                                    docker build -t ticketing-app-frontend-client -f ../application/client/Dockerfile ../application/client/
 
                                     # Deploy the Application Manifest files on Dev Kubernetes Cluster
                                     for folder in 01-database 02-client 03-auth-service 04-ticket-service 05-order-service 06-expiration-service 07-payment-service; do
-                                        kubectl apply -f "./infra/k8s/application-manifests/${folder}" --recursive
+                                        kubectl apply -f "infra/k8s/application-manifests/${folder}" --recursive
                                         sleep 30
                                     done
 
                                     # Deploy the Application Manifest files specific for Dev Kubernetes Cluster
-                                    kubectl apply -f ./infra/k8s/application-manifests-dev --recursive
+                                    kubectl apply -f infra/k8s/application-manifests-dev --recursive
 
                                     sleep 30
                                     echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
