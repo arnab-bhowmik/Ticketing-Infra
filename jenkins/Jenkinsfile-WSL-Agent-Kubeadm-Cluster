@@ -2,24 +2,25 @@ pipeline {
     agent any
 
     environment {
-        K8S_NAMESPACE_NGX = 'ingress-nginx'
-        K8S_NAMESPACE_APP = 'ticketing-app'
-        K8S_NAMESPACE_MQ  = 'rabbitmq-system'
-        K8S_NAMESPACE_CA  = 'cert-manager'
+        K8S_NAMESPACE_NGX           = 'ingress-nginx'
+        K8S_NAMESPACE_APP           = 'ticketing-app'
+        K8S_NAMESPACE_MQ            = 'rabbitmq-system'
+        K8S_NAMESPACE_CA            = 'cert-manager'
         
-        GCP_PROJECT         = 'ticketing-app-prod' 
-        GCP_REGION          = 'us-east1'
+        GCP_PROJECT                 = 'ticketing-app-prod' 
+        GCP_REGION                  = 'us-east1'
 
-        K8S_CLUSTER_NAME    = 'ticketing-app-k8-cluster' 
-        K8S_CLUSTER_ZONE    = 'us-east1-c'
-        K8S_NODE_TYPE       = 'n1-standard-2'
-        K8S_NODE_COUNT      = 3
+        K8S_CLUSTER_NAME            = 'ticketing-app-k8-cluster' 
+        K8S_CLUSTER_ZONE            = 'us-east1-c'
+        K8S_NODE_TYPE               = 'n1-standard-2'
+        K8S_NODE_COUNT              = 3
 
-        KUBECTL_DEV_CONTEXT = 'kubernetes-admin@kubernetes'
-        DOCKER_IMAGE_NAMES  = ' '
+        KUBECTL_DEV_CONTEXT         = 'kubernetes-admin@kubernetes'
+        DOCKER_IMAGE_NAMES          = ' '
+        MONGO_DOCKER_IMAGE_VERSION  = '4.4'
 
-        ARTIFACT_REGISTRY_NAME = 'ticketing-app-artifact-registry'
-        ARTIFACT_REGISTRY_LOCATION = 'us'
+        ARTIFACT_REGISTRY_NAME      = 'ticketing-app-artifact-registry'
+        ARTIFACT_REGISTRY_LOCATION  = 'us'
     }
 
     stages {
@@ -129,7 +130,94 @@ pipeline {
             }
         }
 
-        stage('Deploy Application on Dev Kubernetes Cluster') {
+        stage('Build & Push Application Docker Images to Docker Hub') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', usernameVariable: 'DOCKER_HUB_USERNAME', passwordVariable: 'DOCKER_HUB_PASSWORD')]) {
+                        withEnv(["DOCKER_IMAGE_NAMES=${env.DOCKER_IMAGE_NAMES}"]) {
+                            dir("${env.WORKSPACE}/application"){
+                                echo "Current Directory is:"
+                                sh "pwd"
+                                
+                                sh '''
+                                    docker login -u $DOCKER_HUB_USERNAME -p $DOCKER_HUB_PASSWORD
+
+                                    # Build & Push the Back-End Application Docker Images
+                                    for folder in auth-service expiration-service ticket-service order-service payment-service; do
+                                        # Build the Docker Image
+                                        imageName="ticketing-app-${folder}"
+                                        docker build -t "${imageName}" -f "${folder}/Dockerfile" "${folder}/"
+
+                                        # Tag the Docker image before pushing to Docker Hub
+                                        echo "Tagging the Docker image before pushing to Docker Hub"
+                                        docker tag $imageName:latest $DOCKER_HUB_USERNAME/$imageName:latest
+
+                                        # Push the image to Docker Hub
+                                        echo "Pushing the image to Docker Hub"
+                                        docker push $DOCKER_HUB_USERNAME/$imageName:latest
+                                    
+                                        # Print the results & delete the :latest tagged image
+                                        echo "Pushed image $imageName to Docker Hub with tag as latest"
+                                        docker rmi $DOCKER_HUB_USERNAME/$imageName:latest
+
+                                        # Save the image name as environment variable to access later for cleanup
+                                        updatedArray="${DOCKER_IMAGE_NAMES},${imageName}"
+                                        DOCKER_IMAGE_NAMES=$(echo $updatedArray | sed 's/^[,[:space:]]*//;s/[,[:space:]]*$//')
+                                        echo "Updated image name list: ${DOCKER_IMAGE_NAMES}"
+                                    done
+
+                                    # Build the Front-End Application Docker Images
+                                    docker build -t ticketing-app-frontend-client -f client/Dockerfile client/
+
+                                    # Tag & Push the Front-End Application Docker Image to Docker Hub
+                                    docker tag ticketing-app-frontend-client:latest $DOCKER_HUB_USERNAME/ticketing-app-frontend-client:latest
+                                    docker push $DOCKER_HUB_USERNAME/ticketing-app-frontend-client:latest
+                                    docker rmi $DOCKER_HUB_USERNAME/ticketing-app-frontend-client:latest
+                                    
+                                    # Save the image name as environment variable to access later for cleanup
+                                    updatedArray="${DOCKER_IMAGE_NAMES},ticketing-app-frontend-client"
+                                    DOCKER_IMAGE_NAMES=$(echo $updatedArray | sed 's/^[,[:space:]]*//;s/[,[:space:]]*$//')
+                                    echo "Updated image name list: ${DOCKER_IMAGE_NAMES}"
+                                    
+                                    # Store the environment variable in a file to pass it to the next stage
+                                    echo "${DOCKER_IMAGE_NAMES}" > docker_image_names.txt
+                                '''
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Update Application Manifests prior deployment on Dev Kubernetes Cluster') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', usernameVariable: 'DOCKER_HUB_USERNAME', passwordVariable: 'DOCKER_HUB_PASSWORD')]) {
+                        withEnv(["MONGO_DOCKER_IMAGE_VERSION=${env.MONGO_DOCKER_IMAGE_VERSION}"]) {
+                            dir("${env.WORKSPACE}/infrastructure"){
+                                echo "Current Directory is:"
+                                sh "pwd"
+
+                                sh '''
+                                    cp -r infra/k8s/application-manifests/* infra/k8s/application-manifests-dev/
+
+                                    for file in infra/k8s/application-manifests-dev/01-database/*; do
+                                        sed -i "s|image: mongo|image: mongo:${MONGO_DOCKER_IMAGE_VERSION}|" ${file}
+                                    done
+
+                                    for folder in 02-client 03-auth-service 04-ticket-service 05-order-service 06-expiration-service 07-payment-service; do
+                                        sed -i "s|^\\(\\s*image:\\s*\\)\\([^:]*\\):latest|\\1${DOCKER_HUB_USERNAME}/\\2:latest|" infra/k8s/application-manifests-dev/${folder}/*.yaml
+                                        sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests-dev/${folder}/*.yaml
+                                    done
+                                '''
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Deploy Application Manifests on Dev Kubernetes Cluster') {
             steps {
                 script {
                     withCredentials([string(credentialsId: 'jwt-secret-key', variable: 'JWT_KEY'),string(credentialsId: 'rabbitmq-username', variable: 'RABBITMQ_USERNAME'),string(credentialsId: 'rabbitmq-password', variable: 'RABBITMQ_PASSWORD'),string(credentialsId: 'rzp-key-id', variable: 'RAZORPAY_KEY_ID'),string(credentialsId: 'rzp-key-secret', variable: 'RAZORPAY_KEY_SECRET'),string(credentialsId: 'mailjet-api-key', variable: 'MAILJET_API_KEY'),string(credentialsId: 'mailjet-api-secret', variable: 'MAILJET_API_SECRET'),string(credentialsId: 'notification-email-sender', variable: 'APP_NOTIFICATION_SENDER_EMAIL')]) {
@@ -217,33 +305,14 @@ pipeline {
                                     kubectl get all  -n ${K8S_NAMESPACE_NGX}
 
                                     ############################### APPLICATION ###############################
-                                    ## Build the Application Docker Images via Skaffold
-                                    #skaffold build --profile dev --module ${K8S_NAMESPACE_APP} --file-output=build_artifacts.json
-                                    
-                                    ## Deploy the built artifacts on Kubernetes cluster via Skaffold
-                                    #skaffold deploy --profile dev --module ${K8S_NAMESPACE_APP} --build-artifacts=build_artifacts.json
-
-                                    ## The App Service pods might have issues connecting to their corresponding DB pods, hence scaling down and up again
-                                    #kubectl scale deployment auth-deployment order-deployment ticket-deployment expiration-deployment payment-deployment -n ${K8S_NAMESPACE_APP} --replicas=0
-                                    #sleep 30
-                                    #kubectl scale deployment auth-deployment order-deployment ticket-deployment expiration-deployment payment-deployment -n ${K8S_NAMESPACE_APP} --replicas=1
-
-                                    # Build the Back-End Application Docker Images
-                                    for folder in auth-service expiration-service ticket-service order-service payment-service; do
-                                        docker build -t "ticketing-app-${folder}" -f "../application/${folder}/Dockerfile" "../application/${folder}/"
-                                    done
-
-                                    # Build the Front-End Application Docker Images
-                                    docker build -t ticketing-app-frontend-client -f ../application/client/Dockerfile ../application/client/
-
                                     # Deploy the Application Manifest files on Dev Kubernetes Cluster
                                     for folder in 01-database 02-client 03-auth-service 04-ticket-service 05-order-service 06-expiration-service 07-payment-service; do
-                                        kubectl apply -f "infra/k8s/application-manifests/${folder}" --recursive
+                                        kubectl apply -f "infra/k8s/application-manifests-dev/${folder}" --recursive
                                         sleep 30
                                     done
 
-                                    # Deploy the Application Manifest files specific for Dev Kubernetes Cluster
-                                    kubectl apply -f infra/k8s/application-manifests-dev --recursive
+                                    # Deploy the Ingress Service for Dev Kubernetes Cluster
+                                    kubectl apply -f infra/k8s/application-manifests-dev/ingress-service.yaml
 
                                     sleep 30
                                     echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
@@ -256,133 +325,40 @@ pipeline {
             }
         }
 
-        stage('Push Images to Docker Hub') {
-            steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', usernameVariable: 'DOCKER_HUB_USERNAME', passwordVariable: 'DOCKER_HUB_PASSWORD')]) {
-                        withEnv(["DOCKER_IMAGE_NAMES=${env.DOCKER_IMAGE_NAMES}"]) {
-                            sh '''
-                                docker login -u $DOCKER_HUB_USERNAME -p $DOCKER_HUB_PASSWORD
-
-                                #for item in $(cat build_artifacts.json | jq -c '.builds[]'); do
-                                    ## Extract the image name and corresponding tag
-                                    #echo "Extracting the image name and corresponding tag..."
-                                    #imageName=$(echo "$item" | jq -r '.imageName')
-                                    #tag=$(echo "$item" | jq -r '.tag | split(":")[1]')
-                                    
-                                    ## Tag the extracted Docker image before pushing to Docker Hub
-                                    #echo "Tagging the extracted Docker image before pushing to Docker Hub"
-                                    #docker tag $imageName:$tag $DOCKER_HUB_USERNAME/$imageName:latest
-                                
-                                for imageName in ticketing-app-frontend-client ticketing-app-auth-service ticketing-app-expiration-service ticketing-app-ticket-service ticketing-app-order-service ticketing-app-payment-service; do
-                                    # Tag the Docker image before pushing to Docker Hub
-                                    echo "Tagging the Docker image before pushing to Docker Hub"
-                                    docker tag $imageName:latest $DOCKER_HUB_USERNAME/$imageName:latest
-
-                                    # Push the image to Docker Hub
-                                    echo "Pushing the image to Docker Hub"
-                                    docker push $DOCKER_HUB_USERNAME/$imageName:latest
-                                
-                                    # Print the results & delete the :latest tagged image
-                                    echo "Pushed image $imageName to Docker Hub with tag as latest"
-                                    docker rmi $DOCKER_HUB_USERNAME/$imageName:latest
-                                    
-                                    # Save the image name as environment variable to access later for cleanup
-                                    updatedArray="${DOCKER_IMAGE_NAMES},${imageName}"
-                                    DOCKER_IMAGE_NAMES=$(echo $updatedArray | sed 's/^[,[:space:]]*//;s/[,[:space:]]*$//')
-                                    echo "Updated image name list: ${DOCKER_IMAGE_NAMES}"  
-                                done
-                                
-                                # Store the environment variable in a file to pass it to the next stage
-                                echo "${DOCKER_IMAGE_NAMES}" > docker_image_names.txt
-                            '''
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Push Images to Google Cloud Artifact Registry') {
+        stage('Push Application Docker Images to Google Cloud Artifact Registry') {
             steps {
                 script {
                     withCredentials([file(credentialsId: 'gke-service-account-key', variable: 'GCLOUD_KEY')]) {
                         withEnv(["DOCKER_IMAGE_NAMES=${env.DOCKER_IMAGE_NAMES}","GCP_PROJECT=${env.GCP_PROJECT}","K8S_CLUSTER_NAME=${env.K8S_CLUSTER_NAME}","K8S_CLUSTER_ZONE=${env.K8S_CLUSTER_ZONE}","ARTIFACT_REGISTRY_NAME=${env.ARTIFACT_REGISTRY_NAME}","ARTIFACT_REGISTRY_LOCATION=${ARTIFACT_REGISTRY_LOCATION}"]) {
-                            dir("${env.WORKSPACE}/infrastructure"){
+                            dir("${env.WORKSPACE}/application"){
                                 echo "Current Directory is:"
                                 sh "pwd"
-                                
+
                                 sh '''
                                     # Authenticate with Google Cloud using a service account key
                                     gcloud auth activate-service-account --key-file=${GCLOUD_KEY}
+                                '''
 
-                                    #for item in $(cat build_artifacts.json | jq -c '.builds[]'); do
-                                        ## Extract the image name and corresponding tag
-                                        #echo "Extracting the image name and corresponding tag..."
-                                        #imageName=$(echo "$item" | jq -r '.imageName')
-                                        #tag=$(echo "$item" | jq -r '.tag | split(":")[1]')
-
-                                        ## Create the corresponding Google Cloud Image name
-                                        #gcrImage="gcr.io/${GCP_PROJECT}/$imageName:latest"
-                                        # gcrImage="${ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${GCP_PROJECT}/${ARTIFACT_REGISTRY_NAME}/$imageName:latest"
-
-                                        ## Tag the extracted Docker image before pushing to Google Cloud Artifact Registry in the format gcr.io/project/repo/image:latest
-                                        #echo "Tagging the extracted Docker image before pushing to Google Cloud Artifact Registry"
-                                        #docker tag $imageName:latest $gcrImage
-
-                                    for imageName in ticketing-app-frontend-client ticketing-app-auth-service ticketing-app-expiration-service ticketing-app-ticket-service ticketing-app-order-service ticketing-app-payment-service; do   
-                                        # Create the corresponding Google Cloud Image name
-                                        gcrImage="gcr.io/${GCP_PROJECT}/$imageName:latest"
-                                        # gcrImage="${ARTIFACT_REGISTRY_LOCATION}-docker.pkg.dev/${GCP_PROJECT}/${ARTIFACT_REGISTRY_NAME}/$imageName:latest"
-
+                                // Access the environment variable from the previous stage
+                                DOCKER_IMAGE_NAMES = readFile('docker_image_names.txt').trim()
+                                
+                                // Push locally built Docker Images iterating on the names
+                                DOCKER_IMAGE_NAMES.tokenize(",").each { imageName ->
+                                    sh """
                                         # Tag the Docker image before pushing to Google Cloud Artifact Registry in the format gcr.io/project/repo/image:latest
                                         echo "Tagging the Docker image before pushing to Google Cloud Artifact Registry"
-                                        docker tag $imageName:latest $gcrImage
+                                        docker tag $imageName:latest gcr.io/${GCP_PROJECT}/$imageName:latest
                                     
                                         # Push the image to Google Cloud Artifact Registry using service account 
                                         # Ensure the service account has correct access - artifactregistry.writer & artifactregistry.reader on the Container/Artifact Registry
                                         echo "Pushing the image to Google Cloud Artifact Registry"
-                                        docker push $gcrImage
+                                        docker push gcr.io/${GCP_PROJECT}/$imageName:latest
                                     
                                         # Print the results & delete the :latest tagged image
                                         echo "Pushed image $imageName to Google Cloud Artifact Registry with tag as latest"
-                                        docker rmi $gcrImage
-
-                                        # Replace the image name in the corresponding Kubernetes deployment manifest file
-                                        if echo "$imageName" | grep -q "client" 
-                                        then
-                                            sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/02-client/*.yaml
-                                            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/02-client/*.yaml
-                                        elif echo "$imageName" | grep -q "auth-service" 
-                                        then
-                                            sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/03-auth-service/*.yaml
-                                            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/03-auth-service/*.yaml
-                                        elif echo "$imageName" | grep -q "ticket-service" 
-                                        then
-                                            sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/04-ticket-service/*.yaml
-                                            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/04-ticket-service/*.yaml
-                                        elif echo "$imageName" | grep -q "order-service" 
-                                        then
-                                            sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/05-order-service/*.yaml
-                                            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/05-order-service/*.yaml
-                                        elif echo "$imageName" | grep -q "expiration-service" 
-                                        then
-                                            sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/06-expiration-service/*.yaml
-                                            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/06-expiration-service/*.yaml
-                                        elif echo "$imageName" | grep -q "payment-service" 
-                                        then
-                                            sed -i "s|image:.*|image: $gcrImage|" infra/k8s/application-manifests/07-payment-service/*.yaml
-                                            sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests/07-payment-service/*.yaml
-                                        fi
-
-                                        # Save the image name as environment variable to access later for cleanup
-                                        updatedArray="${DOCKER_IMAGE_NAMES},${imageName}"
-                                        DOCKER_IMAGE_NAMES=$(echo $updatedArray | sed 's/^[,[:space:]]*//;s/[,[:space:]]*$//')
-                                        echo "Updated image name list: ${DOCKER_IMAGE_NAMES}" 
-                                    done
-
-                                    # Store the environment variable in a file to pass it to the next stage
-                                    echo "${DOCKER_IMAGE_NAMES}" > docker_image_names.txt
-                                '''
+                                        docker rmi gcr.io/${GCP_PROJECT}/$imageName:latest
+                                    """
+                                }
                             }
                         }
                     }
@@ -390,100 +366,29 @@ pipeline {
             }
         }
 
-        stage('Cleanup Deployment on Dev Kubernetes Cluster') {
+        stage('Update Application Manifests prior deployment on Prod Kubernetes Cluster') {
             steps {
                 script {
-                    withEnv(["K8S_NAMESPACE_NGX=${env.K8S_NAMESPACE_NGX}","K8S_NAMESPACE_APP=${env.K8S_NAMESPACE_APP}","KUBECTL_DEV_CONTEXT=${env.KUBECTL_DEV_CONTEXT}"]) {
-                        sh '''                          
-                            # Check the available Kubernetes contexts
-                            kubectl config get-contexts
-                            
-                            # Set the Kubernetes context explicitly
-                            kubectl config use-context ${KUBECTL_DEV_CONTEXT}
+                    withCredentials([usernamePassword(credentialsId: 'docker-hub-creds', usernameVariable: 'DOCKER_HUB_USERNAME', passwordVariable: 'DOCKER_HUB_PASSWORD')]) {
+                        withEnv(["GCP_PROJECT=${env.GCP_PROJECT}"]) {
+                            dir("${env.WORKSPACE}/infrastructure"){
+                                echo "Current Directory is:"
+                                sh "pwd"
 
-                            # Verify the kubectl context
-                            kubectl config current-context
-                        
-                            ############################### K8s SECRETS ###############################
-                            # Delete the JWT Secret
-                            kubectl delete secret jwt-secret -n ${K8S_NAMESPACE_APP}
+                                sh '''
+                                    cp -r infra/k8s/application-manifests/* infra/k8s/application-manifests-prod/
 
-                            # Delete the RabbitMQ User Secret
-                            kubectl delete secret rabbitmq-user-imported-creds-secret -n ${K8S_NAMESPACE_APP}
+                                    for file in infra/k8s/application-manifests-prod/01-database/*; do
+                                        sed -i "s|image: mongo|image: mongo:${MONGO_DOCKER_IMAGE_VERSION}|" ${file}
+                                    done
 
-                            # Delete the Razorpay API Key Secret
-                            kubectl delete secret razorpay-secret -n ${K8S_NAMESPACE_APP}
-
-                            # Delete the MailJet API Key Secret
-                            kubectl delete secret mailjet-secret -n ${K8S_NAMESPACE_APP}
-
-                            # Delete the Notification Email Sender Address Secret
-                            kubectl delete secret app-notification-sender-email-address-secret -n ${K8S_NAMESPACE_APP}
-
-                            ############################### APPLICATION ###############################
-                            # Delete Kubernetes Namespaces 
-                            echo "Cleaning up the deployed applications & services for all kubernetes namespaces..."
-                            kubectl delete namespace ${K8S_NAMESPACE_NGX}
-                            kubectl delete namespace ${K8S_NAMESPACE_APP}
-                            kubectl delete namespace ${K8S_NAMESPACE_MQ}
-                            kubectl delete namespace ${K8S_NAMESPACE_CA}
-                            
-                            sleep 30
-                            echo "Displaying all resources for namespace - ${K8S_NAMESPACE_NGX}"
-                            kubectl get all  -n ${K8S_NAMESPACE_NGX}
-                            echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
-                            kubectl get all  -n ${K8S_NAMESPACE_APP}
-                            echo "Displaying all resources for namespace - ${K8S_NAMESPACE_MQ}"
-                            kubectl get all  -n ${K8S_NAMESPACE_MQ}
-                            echo "Displaying all resources for namespace - ${K8S_NAMESPACE_CA}"
-                            kubectl get all  -n ${K8S_NAMESPACE_CA}
-
-                            # Delete the Persistent Volume
-                            kubectl delete -f infra/k8s/pre-requisite-manifests-dev/rabbitmqcluster-pv.yaml
-
-                            # Delete the Storage Class
-                            kubectl delete -f infra/k8s/pre-requisite-manifests-dev/storageclass.yaml
-                        '''
-                        
-                        // Access the environment variable from the previous stage
-                        DOCKER_IMAGE_NAMES = readFile('docker_image_names.txt').trim()
-                        
-                        // Delete locally built Docker Images iterating on the names
-                        DOCKER_IMAGE_NAMES.tokenize(",").each { name ->
-                            sh """
-                                # Delete locally generated Docker images on the Agent Node
-                                echo "Deleting locally generated Docker image $name on the Agent Node"
-                                docker images --format "{{.Repository}}:{{.Tag}}" | grep "^$name:" | xargs -I {} docker rmi {}
-                            """
+                                    for folder in 02-client 03-auth-service 04-ticket-service 05-order-service 06-expiration-service 07-payment-service; do
+                                        sed -i "s|^\\(\\s*image:\\s*\\)\\([^:]*\\):latest|\\1gcr.io/${GCP_PROJECT}/\\2:latest|" infra/k8s/application-manifests-prod/${folder}/*.yaml
+                                        sed -i "s|imagePullPolicy:.*|imagePullPolicy: Always|" infra/k8s/application-manifests-prod/${folder}/*.yaml
+                                    done
+                                '''
+                            }
                         }
-                        
-                        sh '''
-                            # Get the list of container IDs for created & exited containers
-                            created_container_ids=$(docker ps -aq -f status=created)
-                            exited_container_ids=$(docker ps -aq -f status=exited)
-                            
-                            # Remove created containers if the list is not empty 
-                            if [ -n "$created_container_ids" ]; then
-                                # Remove created containers
-                                docker rm -f $created_container_ids
-                                echo "Created containers removed"
-                            else
-                                echo "No created containers found"
-                            fi
-                            
-                            # Remove exited containers if the list is not empty
-                            if [ -n "$exited_container_ids" ]; then
-                                # Remove exited containers
-                                docker rm -f $exited_container_ids
-                                echo "Exited containers removed"
-                            else
-                                echo "No exited containers found"
-                            fi
-                            
-                            # Remove any dangling images thereafter
-                            echo "Removing any dangling images"
-                            docker image prune -f
-                        '''
                     }
                 }
             }
@@ -529,7 +434,7 @@ pipeline {
             }
         }
 
-        stage('Deploy Application on Google Cloud Kubernetes Cluster') {
+        stage('Deploy Application Manifests on Google Cloud Kubernetes Cluster') {
             steps {
                 script {
                     withCredentials([file(credentialsId: 'gke-service-account-key', variable: 'GCLOUD_KEY'),string(credentialsId: 'jwt-secret-key', variable: 'JWT_KEY'),string(credentialsId: 'rabbitmq-username', variable: 'RABBITMQ_USERNAME'),string(credentialsId: 'rabbitmq-password', variable: 'RABBITMQ_PASSWORD'),string(credentialsId: 'rzp-key-id', variable: 'RAZORPAY_KEY_ID'),string(credentialsId: 'rzp-key-secret', variable: 'RAZORPAY_KEY_SECRET'),string(credentialsId: 'mailjet-api-key', variable: 'MAILJET_API_KEY'),string(credentialsId: 'mailjet-api-secret', variable: 'MAILJET_API_SECRET'),string(credentialsId: 'notification-email-sender', variable: 'APP_NOTIFICATION_SENDER_EMAIL')]) {
@@ -613,12 +518,12 @@ pipeline {
                                     ############################### APPLICATION ###############################
                                     # Deploy the Application Manifest files on Google Cloud Kubernetes Cluster
                                     for folder in 01-database 02-client 03-auth-service 04-ticket-service 05-order-service 06-expiration-service 07-payment-service; do
-                                        kubectl apply -f "./infra/k8s/application-manifests/${folder}" --recursive
+                                        kubectl apply -f "infra/k8s/application-manifests-prod/${folder}" --recursive
                                         sleep 30
                                     done
             
-                                    # Deploy the Application Manifest files specific for Google Cloud Kubernetes Cluster
-                                    kubectl apply -f ./infra/k8s/application-manifests-prod --recursive
+                                    # Deploy the Ingress Service for Google Cloud Kubernetes Cluster
+                                    kubectl apply -f infra/k8s/application-manifests-prod/ingress-service.yaml
             
                                     sleep 30
                                     echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
@@ -631,7 +536,7 @@ pipeline {
             }
         }
 
-        // stage('Deploy Application on Google Cloud Kubernetes Cluster using Ansible') {
+        // stage('Deploy Application Manifests on Google Cloud Kubernetes Cluster using Ansible') {
         //     steps {
         //         script {
         //             withCredentials([file(credentialsId: 'gke-service-account-key', variable: 'GCLOUD_KEY'),string(credentialsId: 'jwt-secret-key', variable: 'JWT_KEY'),string(credentialsId: 'rabbitmq-username', variable: 'RABBITMQ_USERNAME'),string(credentialsId: 'rabbitmq-password', variable: 'RABBITMQ_PASSWORD'),string(credentialsId: 'rzp-key-id', variable: 'RAZORPAY_KEY_ID'),string(credentialsId: 'rzp-key-secret', variable: 'RAZORPAY_KEY_SECRET'),string(credentialsId: 'mailjet-api-key', variable: 'MAILJET_API_KEY'),string(credentialsId: 'mailjet-api-secret', variable: 'MAILJET_API_SECRET'),string(credentialsId: 'notification-email-sender', variable: 'APP_NOTIFICATION_SENDER_EMAIL')]) {
@@ -650,5 +555,109 @@ pipeline {
         //         }
         //     }
         // }
+
+        stage('Cleanup Deployment on Dev Kubernetes Cluster') {
+            steps {
+                script {
+                    withEnv(["K8S_NAMESPACE_NGX=${env.K8S_NAMESPACE_NGX}","K8S_NAMESPACE_APP=${env.K8S_NAMESPACE_APP}","KUBECTL_DEV_CONTEXT=${env.KUBECTL_DEV_CONTEXT}"]) {
+                        dir("${env.WORKSPACE}/application"){
+                            echo "Current Directory is:"
+                            sh "pwd"
+                            
+                            sh '''                          
+                                # Check the available Kubernetes contexts
+                                kubectl config get-contexts
+                                
+                                # Set the Kubernetes context explicitly
+                                kubectl config use-context ${KUBECTL_DEV_CONTEXT}
+
+                                # Verify the kubectl context
+                                kubectl config current-context
+                            
+                                ############################### K8s SECRETS ###############################
+                                # Delete the JWT Secret
+                                kubectl delete secret jwt-secret -n ${K8S_NAMESPACE_APP}
+
+                                # Delete the RabbitMQ User Secret
+                                kubectl delete secret rabbitmq-user-imported-creds-secret -n ${K8S_NAMESPACE_APP}
+
+                                # Delete the Razorpay API Key Secret
+                                kubectl delete secret razorpay-secret -n ${K8S_NAMESPACE_APP}
+
+                                # Delete the MailJet API Key Secret
+                                kubectl delete secret mailjet-secret -n ${K8S_NAMESPACE_APP}
+
+                                # Delete the Notification Email Sender Address Secret
+                                kubectl delete secret app-notification-sender-email-address-secret -n ${K8S_NAMESPACE_APP}
+
+                                ############################### APPLICATION ###############################
+                                # Delete Kubernetes Namespaces 
+                                echo "Cleaning up the deployed applications & services for all kubernetes namespaces..."
+                                kubectl delete namespace ${K8S_NAMESPACE_NGX}
+                                kubectl delete namespace ${K8S_NAMESPACE_APP}
+                                kubectl delete namespace ${K8S_NAMESPACE_MQ}
+                                kubectl delete namespace ${K8S_NAMESPACE_CA}
+                                
+                                sleep 30
+                                echo "Displaying all resources for namespace - ${K8S_NAMESPACE_NGX}"
+                                kubectl get all  -n ${K8S_NAMESPACE_NGX}
+                                echo "Displaying all resources for namespace - ${K8S_NAMESPACE_APP}"
+                                kubectl get all  -n ${K8S_NAMESPACE_APP}
+                                echo "Displaying all resources for namespace - ${K8S_NAMESPACE_MQ}"
+                                kubectl get all  -n ${K8S_NAMESPACE_MQ}
+                                echo "Displaying all resources for namespace - ${K8S_NAMESPACE_CA}"
+                                kubectl get all  -n ${K8S_NAMESPACE_CA}
+
+                                # Delete the Persistent Volume
+                                kubectl delete -f ../infrastructure/infra/k8s/pre-requisite-manifests-dev/rabbitmqcluster-pv.yaml
+
+                                # Delete the Storage Class
+                                kubectl delete -f ../infrastructure/infra/k8s/pre-requisite-manifests-dev/storageclass.yaml
+                            '''
+                            
+                            // Access the environment variable from the previous stage
+                            DOCKER_IMAGE_NAMES = readFile('docker_image_names.txt').trim()
+                            
+                            // Delete locally built Docker Images iterating on the names
+                            DOCKER_IMAGE_NAMES.tokenize(",").each { name ->
+                                sh """
+                                    # Delete locally generated Docker images on the Agent Node
+                                    echo "Deleting locally generated Docker image $name on the Agent Node"
+                                    docker images --format "{{.Repository}}:{{.Tag}}" | grep "^$name:" | xargs -I {} docker rmi {}
+                                """
+                            }
+                            
+                            sh '''
+                                # Get the list of container IDs for created & exited containers
+                                created_container_ids=$(docker ps -aq -f status=created)
+                                exited_container_ids=$(docker ps -aq -f status=exited)
+                                
+                                # Remove created containers if the list is not empty 
+                                if [ -n "$created_container_ids" ]; then
+                                    # Remove created containers
+                                    docker rm -f $created_container_ids
+                                    echo "Created containers removed"
+                                else
+                                    echo "No created containers found"
+                                fi
+                                
+                                # Remove exited containers if the list is not empty
+                                if [ -n "$exited_container_ids" ]; then
+                                    # Remove exited containers
+                                    docker rm -f $exited_container_ids
+                                    echo "Exited containers removed"
+                                else
+                                    echo "No exited containers found"
+                                fi
+                                
+                                # Remove any dangling images thereafter
+                                echo "Removing any dangling images"
+                                docker image prune -f
+                            '''
+                        }
+                    }
+                }
+            }
+        }
     }
 }

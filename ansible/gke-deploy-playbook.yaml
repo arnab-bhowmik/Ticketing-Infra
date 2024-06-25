@@ -30,7 +30,7 @@
       command: gcloud container clusters get-credentials ${K8S_CLUSTER_NAME} --zone ${K8S_CLUSTER_ZONE} --project ${GCP_PROJECT}
 
     - name: Create Application Namespace
-      command: kubectl apply -f ./infra/k8s/pre-requisite-manifests/01-namespace --recursive
+      command: kubectl apply -f infra/k8s/pre-requisite-manifests/01-namespace --recursive
       args:
         chdir: "{{ PROJ_DIR }}"
 
@@ -66,9 +66,9 @@
       shell: |
         app-manifest-folders=("01-database" "02-client" "03-auth-service" "04-ticket-service" "05-order-service" "06-expiration-service" "07-payment-service")
         for folder in "${app-manifest-folders[@]}"; do
-            kubectl apply -f "./infra/k8s/application-manifests/${folder}" --recursive
+            kubectl apply -f "infra/k8s/application-manifests-prod/${folder}" --recursive
             sleep 30
         done
-        kubectl apply -f ./infra/k8s/application-manifests-prod --recursive
+        kubectl apply -f infra/k8s/application-manifests-prod/ingress-service.yaml
       args:
         chdir: "{{ PROJ_DIR }}"
