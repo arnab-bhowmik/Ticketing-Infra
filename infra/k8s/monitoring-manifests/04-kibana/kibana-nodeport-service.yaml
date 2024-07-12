@@ -10,6 +10,6 @@ spec:
   ports:
     - name: service
       protocol: TCP
-      port: 8080
+      port: 5601
       targetPort: 5601
       nodePort: 31000
